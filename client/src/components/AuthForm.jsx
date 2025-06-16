@@ -15,8 +15,8 @@ const AuthForm = ({ onAuthSuccess, API_BASE_URL }) => {
     e.preventDefault();
     setAuthMessage(""); // Clear previous messages
     const url = isRegister
-      ? `${API_BASE_URL}/auth/register`
-      : `${API_BASE_URL}/auth/login`;
+      ? `${API_BASE_URL}/api/auth/register`
+      : `${API_BASE_URL}/api/auth/login`;
     const body = isRegister
       ? { username, email, password }
       : { emailOrUsername: email || username, password };
