@@ -195,7 +195,7 @@ const App = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/tasks`, {
+      const response = await fetch(`${API_BASE_URL}api//tasks`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -239,7 +239,7 @@ const App = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -292,7 +292,7 @@ const App = () => {
 
     console.log("App: Confirming deletion for task ID:", taskToDelete);
     try {
-      const response = await fetch(`${API_BASE_URL}/tasks/${taskToDelete}`, {
+      const response = await fetch(`${API_BASE_URL}/api/tasks/${taskToDelete}`, {
         method: "DELETE",
         headers: {
           "x-auth-token": storedToken, // Use the token from localStorage
