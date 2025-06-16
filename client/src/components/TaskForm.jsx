@@ -71,7 +71,7 @@ const TaskForm = ({ onAddTask, API_BASE_URL }) => {
       }
 
       // Call your backend API for suggestions
-      const response = await fetch(`${API_BASE_URL}/tasks/suggest`, {
+      const response = await fetch(`${API_BASE_URL}/api/tasks/suggest`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
