@@ -97,7 +97,7 @@ const App = () => {
 
     try {
       console.log("App: Sending fetch tasks request with token.");
-      const response = await fetch(`${API_BASE_URL}/tasks`, {
+      const response = await fetch(`${API_BASE_URL}/api/tasks`, {
         headers: {
           "x-auth-token": storedToken, // Use the token from localStorage
         },
