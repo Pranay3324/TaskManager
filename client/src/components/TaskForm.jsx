@@ -50,6 +50,7 @@ const TaskForm = ({ onAddTask, API_BASE_URL }) => {
   };
 
   const handleGenerateSuggestions = async () => {
+    console.log("Generating AI suggestions for title:", title);
     if (!title.trim()) {
       setAiSuggestionMessage(
         "Please enter a main task title to get suggestions."
