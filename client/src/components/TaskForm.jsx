@@ -1,9 +1,6 @@
-// src/components/TaskForm.jsx
 import React, { useState, useEffect } from "react";
 
-// TaskForm is now exclusively for ADDING new tasks
 const TaskForm = ({ onAddTask, API_BASE_URL }) => {
-  // Removed onUpdateTask, editingTask, setEditingTask props
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
@@ -12,35 +9,23 @@ const TaskForm = ({ onAddTask, API_BASE_URL }) => {
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [aiSuggestionMessage, setAiSuggestionMessage] = useState("");
 
-  // Removed useEffect that handled editingTask, as this component no longer edits
   useEffect(() => {
-    // Reset form fields when the component mounts or resets naturally (e.g., after add)
     setTitle("");
     setDescription("");
     setPriority("medium");
     setDueDate("");
     setAiSuggestions([]);
     setAiSuggestionMessage("");
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!title.trim()) {
-      alert("Task title cannot be empty."); // Use custom modal in production
+      alert("Task title cannot be empty.");
       return;
     }
+    onAddTask({ title, description, priority, dueDate: dueDate || null });
 
-    const taskData = {
-      title,
-      description: description.trim(),
-      priority,
-      dueDate: dueDate ? new Date(dueDate).toISOString() : null,
-    };
-
-    console.log("TaskForm: Adding new task. taskData:", taskData);
-    onAddTask(taskData); // Always call onAddTask
-
-    // Reset form after submission
     setTitle("");
     setDescription("");
     setPriority("medium");
@@ -50,12 +35,10 @@ const TaskForm = ({ onAddTask, API_BASE_URL }) => {
   };
 
   const handleGenerateSuggestions = async () => {
-    console.log("Generating AI suggestions for title:", title);
     if (!title.trim()) {
       setAiSuggestionMessage(
         "Please enter a main task title to get suggestions."
       );
-      setAiSuggestions([]);
       return;
     }
 
@@ -64,74 +47,81 @@ const TaskForm = ({ onAddTask, API_BASE_URL }) => {
     setAiSuggestionMessage("");
 
     try {
-      const token = localStorage.getItem("token"); // Get the auth token
+      const token = localStorage.getItem("token");
       if (!token) {
         setAiSuggestionMessage("Please log in to use AI suggestions.");
         setIsLoadingSuggestions(false);
         return;
       }
 
-      // Call your backend API for suggestions
+      console.log(
+        `Requesting suggestions from: ${API_BASE_URL}/api/tasks/suggest`
+      );
+
       const response = await fetch(`${API_BASE_URL}/api/tasks/suggest`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-auth-token": token, // Send the auth token
+          "x-auth-token": token,
         },
         body: JSON.stringify({ mainTaskTitle: title }),
       });
 
-      const data = await response.json();
+      // Handle non-JSON responses (like 404 HTML pages from the server)
+      const contentType = response.headers.get("content-type");
+      let data;
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.error("Non-JSON response received:", text);
+        throw new Error(
+          `Server returned ${response.status} ${response.statusText}. Check backend console.`
+        );
+      }
 
       if (response.ok) {
-        if (
-          data.suggestions &&
-          Array.isArray(data.suggestions) &&
-          data.suggestions.length > 0
-        ) {
+        if (data.suggestions?.length > 0) {
           setAiSuggestions(data.suggestions);
           setAiSuggestionMessage("AI Suggestions:");
         } else {
-          setAiSuggestionMessage(
-            "No suggestions found. Try a different task title."
-          );
+          setAiSuggestionMessage("No suggestions found.");
         }
       } else {
-        setAiSuggestionMessage(data.msg || "Failed to get AI suggestions.");
-        console.error("Backend error getting AI suggestions:", data.msg);
+        // Log detailed error from backend to help debugging
+        // JSON.stringify helps visualize the nested 'error' object in the console
+        console.error("Backend error details:", JSON.stringify(data, null, 2));
+
+        // Try to extract the most specific error message possible
+        const specificError =
+          data.details?.error?.message || data.details?.message || data.msg;
+        setAiSuggestionMessage(
+          `AI Error: ${specificError || "Unknown error occurred"}`
+        );
       }
     } catch (error) {
-      setAiSuggestionMessage(
-        "Network error during AI suggestion. Check backend server."
-      );
-      console.error("Error generating AI suggestions:", error);
+      setAiSuggestionMessage(`Error: ${error.message}`);
+      console.error("AI Generation Error:", error);
     } finally {
       setIsLoadingSuggestions(false);
     }
   };
 
-  const handleAddSuggestionAsTask = (suggestionToAdd) => {
-    const newTaskData = {
-      title: suggestionToAdd,
-      description: "", // Suggestions are concise, no desc by default
-      priority: "medium", // Default priority for suggested tasks
+  const handleAddSuggestionAsTask = (suggestion) => {
+    onAddTask({
+      title: suggestion,
+      description: "",
+      priority: "medium",
       dueDate: null,
-    };
-    onAddTask(newTaskData);
-    // Remove the added suggestion from the AI suggestions list
-    setAiSuggestions((prevSuggestions) =>
-      prevSuggestions.filter((s) => s !== suggestionToAdd)
-    );
-    if (aiSuggestions.length - 1 === 0) {
-      // If it was the last suggestion
-      setAiSuggestionMessage("All suggested tasks added!");
-    }
+    });
+    setAiSuggestions((prev) => prev.filter((s) => s !== suggestion));
+    if (aiSuggestions.length - 1 === 0) setAiSuggestionMessage("");
   };
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl mb-6 border-t-4 border-blue-500 dark:border-blue-700 transition-colors duration-300">
       <h3 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">
-        Add New Task {/* Simplified title */}
+        Add New Task
       </h3>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -203,16 +193,12 @@ const TaskForm = ({ onAddTask, API_BASE_URL }) => {
         </div>
 
         <div className="flex flex-wrap gap-4 items-center">
-          {" "}
-          {/* Use flex-wrap for better mobile layout */}
           <button
             type="submit"
             className="flex-1 min-w-[120px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-bold py-2 px-4 rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 transition-all duration-300 transform hover:scale-105"
           >
             Add Task
           </button>
-          {/* Removed Cancel Edit button */}
-          {/* New AI Suggestion Button */}
           <button
             type="button"
             onClick={handleGenerateSuggestions}
@@ -261,12 +247,12 @@ const TaskForm = ({ onAddTask, API_BASE_URL }) => {
         </div>
       </form>
 
-      {/* Display AI Suggestions */}
       {aiSuggestionMessage && (
         <div
           className={`mt-6 p-4 rounded-lg border-l-4
                     ${
                       aiSuggestionMessage.startsWith("Error") ||
+                      aiSuggestionMessage.startsWith("AI Error") ||
                       aiSuggestionMessage.startsWith("No suggestions") ||
                       aiSuggestionMessage.startsWith("Please enter") ||
                       aiSuggestionMessage.startsWith("Network error") ||

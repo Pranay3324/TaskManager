@@ -2,44 +2,62 @@ const express = require("express");
 const router = express.Router();
 const Task = require("../models/Task");
 const auth = require("../middleware/authMiddleware");
-const fetch = require("node-fetch");
 const dotenv = require("dotenv");
+
+// Dynamic import for the SDK because it might be an ESM-only package in some versions,
+// or we use standard require if supported.
+// However, to be safe with the specific package "@google/genai", we'll initialize it inside the route
+// or use a try-require pattern if you are on CommonJS.
+// Ideally, for "@google/genai", the syntax is:
+const { GoogleGenAI } = require("@google/genai");
 
 dotenv.config();
 
-/**
- * HELPER: fetchWithRetry
- * Handles the 429 (Too Many Requests) error automatically.
- * It uses Exponential Backoff to wait longer between each retry.
- */
-const fetchWithRetry = async (url, options, retries = 5, backoff = 2000) => {
-  try {
-    const response = await fetch(url, options);
+// Initialize the client once
+// It automatically picks up GEMINI_API_KEY from process.env if not passed explicitly,
+// but passing it explicitly is safer for some environments.
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    // If rate limited (429), wait and retry
-    if (response.status === 429 && retries > 0) {
+/**
+ * HELPER: generateWithRetry
+ * Wraps the SDK call with Exponential Backoff to handle 429 errors.
+ */
+const generateWithRetry = async (
+  modelName,
+  prompt,
+  retries = 5,
+  backoff = 2000
+) => {
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+    return response;
+  } catch (err) {
+    // Check if the error is a rate limit (429)
+    // The SDK error object usually contains a status or code
+    if (
+      (err.status === 429 ||
+        err.code === 429 ||
+        err.message?.includes("429")) &&
+      retries > 0
+    ) {
       console.log(
         `[AI-RETRY] Rate limit hit. Waiting ${backoff}ms... (${retries} retries left)`
       );
       await new Promise((resolve) => setTimeout(resolve, backoff));
-      // Double the wait time for the next attempt (2s, 4s, 8s, 16s...)
-      return fetchWithRetry(url, options, retries - 1, backoff * 2);
-    }
-
-    return response;
-  } catch (err) {
-    if (retries > 0) {
-      await new Promise((resolve) => setTimeout(resolve, backoff));
-      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+      // Double the wait time
+      return generateWithRetry(modelName, prompt, retries - 1, backoff * 2);
     }
     throw err;
   }
 };
 
 // --- AI Suggestion Route ---
-// @route   POST /api/tasks/suggest
-// @desc    Get AI-powered sub-task suggestions for a given main task title
-// @access  Private
 router.post("/suggest", auth, async (req, res) => {
   const { mainTaskTitle } = req.body;
 
@@ -47,64 +65,59 @@ router.post("/suggest", auth, async (req, res) => {
     return res.status(400).json({ msg: "Please provide a main task title." });
   }
 
+  if (!process.env.GEMINI_API_KEY) {
+    return res
+      .status(500)
+      .json({ msg: "AI service not configured: API key missing." });
+  }
+
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res
-        .status(500)
-        .json({ msg: "AI service not configured: API key missing." });
-    }
+    // Using 'gemini-1.5-flash' as it is the current stable workhorse.
+    // You can switch to 'gemini-2.5-flash' if your API key has access to it.
+    const modelName = "gemini-2.5-flash";
 
-    // Using 1.5-flash for higher rate limits on shared hosting IPs
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const prompt = `Given the main task "${mainTaskTitle}", suggest 5-8 concise sub-tasks. Respond ONLY with a JSON array of strings, e.g., ["Subtask 1", "Subtask 2"].`;
 
-    const prompt = `Given the main task "${mainTaskTitle}", suggest 3-5 concise sub-tasks. Respond as a JSON array of strings, like ["Subtask 1", "Subtask 2"]. Do not include markdown or the word "json".`;
+    // Call the SDK via our retry helper
+    const response = await generateWithRetry(modelName, prompt);
 
-    const payload = {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
-    };
+    // The SDK response structure is cleaner
+    // In the new @google/genai SDK, .text is a property, not a function.
+    const jsonString = response.text;
 
-    const apiResponse = await fetchWithRetry(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!apiResponse.ok) {
-      if (apiResponse.status === 429) {
-        return res.status(429).json({
-          msg: "AI service is currently busy. Please wait 30 seconds and try again.",
-        });
+    let suggestions = [];
+    try {
+      if (!jsonString) {
+        throw new Error("Empty text response from AI");
       }
-      const errorBody = await apiResponse.json();
-      return res
-        .status(apiResponse.status)
-        .json({ msg: "AI request failed.", details: errorBody });
-    }
-
-    const result = await apiResponse.json();
-
-    if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
-      const jsonString = result.candidates[0].content.parts[0].text;
-      let suggestions = [];
-      try {
-        const cleanJsonString = jsonString.replace(/```json|```/g, "").trim();
-        suggestions = JSON.parse(cleanJsonString);
-      } catch (parseError) {
+      const cleanJsonString = jsonString.replace(/```json|```/g, "").trim();
+      suggestions = JSON.parse(cleanJsonString);
+    } catch (parseError) {
+      // Fallback: split by newlines if JSON parsing fails
+      if (jsonString) {
         suggestions = jsonString
           .split("\n")
           .filter((line) => line.trim() !== "");
+      } else {
+        throw new Error("Could not parse suggestions from AI response");
       }
-      res.json({ suggestions });
-    } else {
-      res.status(500).json({ msg: "AI response was empty." });
     }
+
+    res.json({ suggestions });
   } catch (err) {
-    console.error("AI Route Error:", err.message);
-    res.status(500).json({ msg: "Server Error during AI generation." });
+    console.error("AI Route Error:", err);
+
+    // Handle specific SDK errors
+    if (err.status === 429 || err.message?.includes("429")) {
+      return res.status(429).json({
+        msg: "AI service is busy. Please wait a moment and try again.",
+      });
+    }
+
+    res.status(500).json({
+      msg: "Server Error during AI generation.",
+      details: err.message,
+    });
   }
 });
 
